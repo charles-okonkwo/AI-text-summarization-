@@ -2,7 +2,7 @@
 // ChatGPT-Style Text Summarizer - Frontend JavaScript
 // ============================================================================
 
-const API_BASE_URL = 'http://127.0.0.1:8001';
+const API_BASE_URL = 'https://ai-text-summarization-4.onrender.com/';
 let conversationHistory = [];
 
 // DOM Elements
