@@ -1,0 +1,431 @@
+// ============================================================================
+// ChatGPT-Style Text Summarizer - Frontend JavaScript
+// ============================================================================
+
+const API_BASE_URL = 'http://127.0.0.1:8001';
+let conversationHistory = [];
+
+// DOM Elements
+const userInput = document.getElementById('userInput');
+const chatMessages = document.getElementById('chatMessages');
+const sendBtn = document.querySelector('.send-btn');
+const loadingIndicator = document.querySelector('.loading-indicator');
+const sidebar = document.getElementById('sidebar');
+const newChatBtn = document.querySelector('.new-chat-btn');
+const mobileSidebarToggle = document.querySelector('.mobile-sidebar-toggle');
+const sidebarToggle = document.querySelector('.sidebar-toggle');
+const historyList = document.getElementById('historyList');
+
+// PDF Upload elements
+const inputTabs = document.querySelectorAll('.input-tab');
+const textMode = document.getElementById('textMode');
+const pdfMode = document.getElementById('pdfMode');
+const pdfUploadArea = document.getElementById('pdfUploadArea');
+const pdfInput = document.getElementById('pdfInput');
+const pdfPreview = document.getElementById('pdfPreview');
+const pdfFileName = document.getElementById('pdfFileName');
+const sendPdfBtn = document.getElementById('sendPdfBtn');
+
+let selectedPdfFile = null;
+
+// ============================================================================
+// Event Listeners
+// ============================================================================
+
+// Input mode tab switching
+inputTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+        const mode = tab.dataset.mode;
+        switchInputMode(mode);
+    });
+});
+
+// PDF upload area click
+pdfUploadArea.addEventListener('click', () => {
+    pdfInput.click();
+});
+
+// PDF file selection
+pdfInput.addEventListener('change', handlePdfFileSelect);
+
+// PDF upload area drag and drop
+pdfUploadArea.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    pdfUploadArea.classList.add('dragover');
+});
+
+pdfUploadArea.addEventListener('dragleave', () => {
+    pdfUploadArea.classList.remove('dragover');
+});
+
+pdfUploadArea.addEventListener('drop', (e) => {
+    e.preventDefault();
+    pdfUploadArea.classList.remove('dragover');
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+        pdfInput.files = files;
+        handlePdfFileSelect({ target: { files } });
+    }
+});
+
+// Send PDF button
+sendPdfBtn.addEventListener('click', sendPdfFile);
+
+// Send message on button click
+sendBtn.addEventListener('click', sendMessage);
+
+// Send message on Ctrl+Enter or Cmd+Enter
+userInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        sendMessage();
+    }
+});
+
+// Auto-resize textarea as user types
+userInput.addEventListener('input', () => {
+    userInput.style.height = 'auto';
+    userInput.style.height = Math.min(userInput.scrollHeight, 200) + 'px';
+});
+
+// New chat button
+newChatBtn.addEventListener('click', startNewChat);
+
+// Sidebar toggle buttons (mobile and desktop)
+if (mobileSidebarToggle) {
+    mobileSidebarToggle.addEventListener('click', toggleSidebar);
+}
+
+if (sidebarToggle) {
+    sidebarToggle.addEventListener('click', toggleSidebar);
+}
+
+// Prevent sidebar from closing when clicking inside it (mobile)
+document.addEventListener('click', (e) => {
+    if (!sidebar.contains(e.target) && !mobileSidebarToggle?.contains(e.target) && !sidebarToggle?.contains(e.target)) {
+        if (window.innerWidth < 900) {
+            sidebar.classList.remove('open');
+        }
+    }
+});
+
+// ============================================================================
+// Message Sending
+// ============================================================================
+
+async function sendMessage() {
+    const text = userInput.value.trim();
+
+    if (!text) {
+        userInput.focus();
+        return;
+    }
+
+    // Display user message
+    displayMessage(text, 'user');
+
+    // Clear input and reset height
+    userInput.value = '';
+    userInput.style.height = 'auto';
+
+    // Show loading indicator
+    showLoading(true);
+
+    try {
+        const summary = await getSummary(text);
+        displayMessage(summary, 'ai');
+        
+        // Save to conversation history
+        conversationHistory.push({
+            timestamp: new Date(),
+            userText: text,
+            aiResponse: summary
+        });
+        
+        // Save to localStorage
+        saveConversationHistory();
+    } catch (error) {
+        console.error('Error:', error);
+        displayMessage(
+            'Error: Unable to generate summary. Please try again.',
+            'ai'
+        );
+    } finally {
+        showLoading(false);
+        userInput.focus();
+    }
+}
+
+// ============================================================================
+// API Communication
+// ============================================================================
+
+async function getSummary(text) {
+    const response = await fetch(`${API_BASE_URL}/summarize`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ text: text }),
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to get summary');
+    }
+
+    const data = await response.json();
+    return data.summary;
+}
+
+// ============================================================================
+// Message Display
+// ============================================================================
+
+function displayMessage(message, sender) {
+    // Remove welcome section on first message
+    const welcomeSection = chatMessages.querySelector('.welcome-section');
+    if (welcomeSection) {
+        welcomeSection.remove();
+    }
+
+    // Create message element
+    const messageDiv = document.createElement('div');
+    messageDiv.classList.add('message', `${sender}-message`);
+
+    // Create message content
+    const contentDiv = document.createElement('div');
+    contentDiv.classList.add('message-content');
+    contentDiv.textContent = message;
+
+    messageDiv.appendChild(contentDiv);
+    chatMessages.appendChild(messageDiv);
+
+    // Scroll to bottom
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+// ============================================================================
+// Loading Indicator
+// ============================================================================
+
+function showLoading(show) {
+    if (show) {
+        loadingIndicator.classList.add('active');
+    } else {
+        loadingIndicator.classList.remove('active');
+    }
+}
+
+// ============================================================================
+// Chat Management
+// ============================================================================
+
+function startNewChat() {
+    // Clear conversation
+    conversationHistory = [];
+    
+    // Clear messages
+    chatMessages.innerHTML = '';
+    
+    // Reset input
+    userInput.value = '';
+    userInput.style.height = 'auto';
+    
+    // Add welcome section back
+    const welcomeSection = document.createElement('div');
+    welcomeSection.classList.add('welcome-section');
+    welcomeSection.innerHTML = `
+        <h1>Text Summarizer</h1>
+        <p>Paste any text and get an AI-powered summary instantly</p>
+    `;
+    chatMessages.appendChild(welcomeSection);
+    
+    // Close sidebar on mobile
+    if (window.innerWidth < 900) {
+        sidebar.classList.remove('open');
+    }
+    
+    // Focus input
+    userInput.focus();
+}
+
+// ============================================================================
+// Sidebar Management
+// ============================================================================
+
+function toggleSidebar() {
+    sidebar.classList.toggle('open');
+}
+
+// ============================================================================
+// History Management
+// ============================================================================
+
+function saveConversationHistory() {
+    // Save to localStorage
+    localStorage.setItem('summarizerHistory', JSON.stringify(conversationHistory));
+    updateHistoryUI();
+}
+
+function updateHistoryUI() {
+    historyList.innerHTML = '';
+    
+    if (conversationHistory.length === 0) {
+        historyList.innerHTML = '<div class="empty-state">No conversation history</div>';
+        return;
+    }
+    
+    // Show only last 10 conversations
+    const recentConversations = conversationHistory.slice(-10).reverse();
+    
+    recentConversations.forEach((conv, index) => {
+        const historyItem = document.createElement('button');
+        historyItem.classList.add('history-item');
+        
+        // Extract first 30 characters of user text as label
+        const label = conv.userText.substring(0, 30) + (conv.userText.length > 30 ? '...' : '');
+        historyItem.textContent = label;
+        historyItem.title = conv.userText;
+        
+        // Load conversation on click
+        historyItem.addEventListener('click', () => {
+            loadConversation(conv);
+        });
+        
+        historyList.appendChild(historyItem);
+    });
+}
+
+function loadConversation(conv) {
+    // Clear current chat
+    chatMessages.innerHTML = '';
+    
+    // Display the conversation
+    displayMessage(conv.userText, 'user');
+    displayMessage(conv.aiResponse, 'ai');
+    
+    // Close sidebar on mobile
+    if (window.innerWidth < 900) {
+        sidebar.classList.remove('open');
+    }
+}
+
+// ============================================================================
+// Input Mode Management
+// ============================================================================
+
+function switchInputMode(mode) {
+    // Update tabs
+    inputTabs.forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.mode === mode);
+    });
+    
+    // Update modes
+    if (mode === 'text') {
+        textMode.style.display = 'flex';
+        pdfMode.style.display = 'none';
+        userInput.focus();
+    } else if (mode === 'pdf') {
+        textMode.style.display = 'none';
+        pdfMode.style.display = 'flex';
+    }
+}
+
+// ============================================================================
+// PDF File Handling
+// ============================================================================
+
+function handlePdfFileSelect(event) {
+    const files = event.target.files;
+    if (files.length === 0) return;
+    
+    const file = files[0];
+    
+    // Validate file type
+    if (!file.type.includes('pdf')) {
+        alert('Please select a valid PDF file');
+        return;
+    }
+    
+    // Validate file size (50MB limit)
+    if (file.size > 50 * 1024 * 1024) {
+        alert('File is too large. Maximum size is 50MB');
+        return;
+    }
+    
+    // Store file and show preview
+    selectedPdfFile = file;
+    pdfUploadArea.style.display = 'none';
+    pdfPreview.style.display = 'flex';
+    pdfFileName.textContent = `📄 ${file.name}`;
+}
+
+async function sendPdfFile() {
+    if (!selectedPdfFile) {
+        alert('Please select a PDF file first');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('file', selectedPdfFile);
+    
+    // Display file info message
+    displayMessage(`📄 Processing PDF: ${selectedPdfFile.name}`, 'user');
+    
+    // Show loading
+    showLoading(true);
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/summarize-pdf`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.detail || 'Failed to summarize PDF');
+        }
+        
+        const data = await response.json();
+        displayMessage(data.summary, 'ai');
+        
+        // Save to history
+        conversationHistory.push({
+            timestamp: new Date(),
+            userText: `PDF: ${selectedPdfFile.name}`,
+            aiResponse: data.summary
+        });
+        
+        saveConversationHistory();
+    } catch (error) {
+        console.error('Error:', error);
+        displayMessage(
+            'Error: Unable to summarize PDF. Please try again.',
+            'ai'
+        );
+    } finally {
+        showLoading(false);
+    }
+}
+
+// ============================================================================
+// Initialization
+// ============================================================================
+
+document.addEventListener('DOMContentLoaded', () => {
+    // Load history from localStorage
+    const savedHistory = localStorage.getItem('summarizerHistory');
+    if (savedHistory) {
+        try {
+            conversationHistory = JSON.parse(savedHistory);
+            updateHistoryUI();
+        } catch (e) {
+            console.error('Error loading history:', e);
+        }
+    } else {
+        historyList.innerHTML = '<div class="empty-state">No conversation history</div>';
+    }
+    
+    // Focus input on load
+    userInput.focus();
+});
