@@ -1,17 +1,17 @@
 # FastAPI and Server
-fastapi==0.104.1
-uvicorn==0.24.0
+fastapi
+uvicorn
 
 # ML/AI Libraries
-transformers==4.35.2
-torch==2.10.0
-numpy==1.24.3
+transformers
+torch
+numpy
 
 # Data Validation
-pydantic==2.5.0
+pydantic
 
 # Utilities
-python-dotenv==1.0.0
+python-dotenv
 
 # PDF Processing
-PyPDF2==3.0.1
+PyPDF2
