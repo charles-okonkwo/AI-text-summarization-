@@ -323,8 +323,8 @@ if __name__ == "__main__":
     # reload=False disables auto-reload to prevent hot reload issues with model initialization
     uvicorn.run(
         "main:app",
-        host="127.0.0.1",
-        port=8001,
+        host="0.0.0.0",
+        port=8000,
         reload=False
     )
  
