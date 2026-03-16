@@ -1,7 +1,7 @@
 # FastAPI Backend for AI Text Summarizer Chatbot
 # This module sets up a REST API endpoint for text summarization
 # using Hugging Face Transformers library
-
+ 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -11,11 +11,11 @@ import logging
 from fastapi import File, UploadFile
 import PyPDF2
 import io
-
+ 
 # Configure logging for debugging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
+ 
 # ============================================================================
 # Initialize FastAPI Application
 # ============================================================================
@@ -24,7 +24,7 @@ app = FastAPI(
     description="API for summarizing text using Hugging Face Transformers",
     version="1.0.0"
 )
-
+ 
 # ============================================================================
 # Configure CORS (Cross-Origin Resource Sharing)
 # This allows the frontend to communicate with the backend
@@ -36,35 +36,35 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
+ 
 # ============================================================================
 # Global variables to store the summarization model and tokenizer
-# These are loaded once when the server starts to improve performance
+# These are loaded on-demand (lazy loading) to save memory
 # ============================================================================
 model = None
 tokenizer = None
-
-
+ 
+ 
 # ============================================================================
 # Data Model for Request/Response
 # ============================================================================
 class SummarizeRequest(BaseModel):
     """Data model for incoming request."""
     text: str
-
+ 
     class Config:
         schema_extra = {
             "example": {
                 "text": "Your long text here..."
             }
         }
-
-
+ 
+ 
 class SummarizeResponse(BaseModel):
     """Data model for outgoing response."""
     summary: str
-
-
+ 
+ 
 # ============================================================================
 # Function to Load Summarization Model
 # ============================================================================
@@ -87,8 +87,24 @@ def load_summarization_model():
     except Exception as e:
         logger.error(f"Error loading model: {str(e)}")
         raise
-
-
+ 
+ 
+# ============================================================================
+# Function to Ensure Model is Loaded
+# Load the model on-demand (lazy loading) to save memory
+# ============================================================================
+def ensure_model_loaded():
+    """
+    Ensure the model is loaded. Load on-demand if not already loaded.
+    This saves memory by only loading when needed.
+    """
+    global model, tokenizer
+    if model is None or tokenizer is None:
+        logger.info("Model not loaded yet, loading now...")
+        model, tokenizer = load_summarization_model()
+    return model, tokenizer
+ 
+ 
 # ============================================================================
 # Function to Extract Text from PDF
 # ============================================================================
@@ -120,20 +136,8 @@ def extract_text_from_pdf(file_content: bytes) -> str:
     except Exception as e:
         logger.error(f"Error extracting PDF text: {str(e)}")
         raise
-
-
-# ============================================================================
-# Startup Event
-# Load the model when the server starts
-# ============================================================================
-@app.on_event("startup")
-async def startup_event():
-    """Load the summarization model and tokenizer when the server starts."""
-    global model, tokenizer
-    model, tokenizer = load_summarization_model()
-    logger.info("Server started and model loaded!")
-
-
+ 
+ 
 # ============================================================================
 # Health Check Endpoint
 # ============================================================================
@@ -146,8 +150,8 @@ async def health_check():
         dict: Status message
     """
     return {"status": "API is running"}
-
-
+ 
+ 
 # ============================================================================
 # Main Summarization Endpoint
 # ============================================================================
@@ -173,12 +177,8 @@ async def summarize_text(request: SummarizeRequest):
                 detail="Text cannot be empty"
             )
         
-        # Check if model is loaded
-        if model is None or tokenizer is None:
-            raise HTTPException(
-                status_code=500,
-                detail="Model is still loading. Please try again in a moment."
-            )
+        # Load model on-demand
+        model, tokenizer = ensure_model_loaded()
         
         logger.info(f"Received text of length: {len(request.text)}")
         
@@ -222,8 +222,8 @@ async def summarize_text(request: SummarizeRequest):
             status_code=500,
             detail=f"Error summarizing text: {str(e)}"
         )
-
-
+ 
+ 
 # ============================================================================
 # PDF Summarization Endpoint
 # ============================================================================
@@ -271,12 +271,8 @@ async def summarize_pdf(file: UploadFile = File(...)):
         extracted_text = extract_text_from_pdf(file_content)
         logger.info(f"Extracted {len(extracted_text)} characters from PDF")
         
-        # Check if model is loaded
-        if model is None or tokenizer is None:
-            raise HTTPException(
-                status_code=500,
-                detail="Model is still loading. Please try again in a moment."
-            )
+        # Load model on-demand
+        model, tokenizer = ensure_model_loaded()
         
         # Tokenize the extracted text
         inputs = tokenizer.encode(extracted_text, return_tensors="pt", max_length=1024, truncation=True)
@@ -314,8 +310,8 @@ async def summarize_pdf(file: UploadFile = File(...)):
             status_code=500,
             detail=f"Error summarizing PDF: {str(e)}"
         )
-
-
+ 
+ 
 # ============================================================================
 # Run the Server
 # Use: python main.py
@@ -331,3 +327,4 @@ if __name__ == "__main__":
         port=8001,
         reload=False
     )
+ 
