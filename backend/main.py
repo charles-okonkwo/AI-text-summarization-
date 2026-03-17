@@ -11,6 +11,8 @@ import PyPDF2
 import io
 import requests
 import os
+import re
+from collections import Counter
 
 # Configure logging for debugging
 logging.basicConfig(level=logging.INFO)
@@ -19,10 +21,10 @@ logger = logging.getLogger(__name__)
 # Get HF token from environment variable
 HF_TOKEN = os.getenv("HF_TOKEN")
 if not HF_TOKEN:
-    logger.warning("HF_TOKEN environment variable not set. Summarization will fail.")
+    logger.warning("HF_TOKEN environment variable not set. Summarization will fall back to extractive.")
 
-# Hugging Face Inference API configuration
-HF_API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
+# Hugging Face Inference API configuration (updated endpoint)
+HF_API_URL = "https://router.huggingface.co/models/facebook/bart-large-cnn"
 HF_HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
  
 # ============================================================================
@@ -75,6 +77,7 @@ def abstractive_summarize(text: str) -> str:
     """
     Summarize text using Hugging Face Inference API (BART model).
     This performs true abstractive summarization - generating new sentences.
+    Falls back to extractive if HF API fails.
     
     Args:
         text (str): The text to summarize
@@ -83,11 +86,12 @@ def abstractive_summarize(text: str) -> str:
         str: The summary
         
     Raises:
-        Exception: If API call fails
+        Exception: If both API and fallback fail
     """
     try:
         if not HF_TOKEN:
-            raise Exception("HF_TOKEN not configured. Please set HF_TOKEN environment variable.")
+            logger.warning("HF_TOKEN not configured. Falling back to extractive summarization.")
+            return extractive_summarize(text)
         
         # Split text into chunks if too long (max ~1024 tokens)
         # BART has input limit, so truncate if needed
@@ -97,14 +101,14 @@ def abstractive_summarize(text: str) -> str:
         
         logger.info(f"Sending text to HF API for summarization (length: {len(text)})")
         
-        # Call Hugging Face Inference API
+        # Call Hugging Face Inference API with timeout
         payload = {"inputs": text}
-        response = requests.post(HF_API_URL, headers=HF_HEADERS, json=payload, timeout=30)
+        response = requests.post(HF_API_URL, headers=HF_HEADERS, json=payload, timeout=60)
         
         if response.status_code != 200:
             error_msg = response.text
-            logger.error(f"HF API error: {response.status_code} - {error_msg}")
-            raise Exception(f"Hugging Face API error: {error_msg}")
+            logger.warning(f"HF API error: {response.status_code} - {error_msg}. Falling back to extractive.")
+            return extractive_summarize(text)
         
         result = response.json()
         
@@ -114,11 +118,85 @@ def abstractive_summarize(text: str) -> str:
         else:
             summary = result.get("summary_text", "")
         
-        logger.info(f"Summarization successful! Summary length: {len(summary)}")
+        if not summary:
+            logger.warning("Empty summary from HF API. Falling back to extractive.")
+            return extractive_summarize(text)
+        
+        logger.info(f"Abstractive summarization successful! Summary length: {len(summary)}")
+        return summary
+        
+    except requests.exceptions.Timeout:
+        logger.warning("HF API timeout. Falling back to extractive summarization.")
+        return extractive_summarize(text)
+    except Exception as e:
+        logger.warning(f"HF API error: {str(e)}. Falling back to extractive summarization.")
+        return extractive_summarize(text)
+
+
+# ============================================================================
+# Fallback: Extractive Summarization
+# ============================================================================
+def extractive_summarize(text: str, num_sentences: int = None) -> str:
+    """
+    Extract the most important sentences from text based on word frequency.
+    Used as fallback when HF API is unavailable.
+    
+    Args:
+        text (str): The text to summarize
+        num_sentences (int): Number of sentences to extract (auto-calculated if None)
+        
+    Returns:
+        str: The summary
+    """
+    try:
+        # Split into sentences
+        sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+        sentences = [s.strip() for s in sentences if s.strip()]
+        
+        if len(sentences) == 0:
+            return text
+        
+        # Auto-calculate number of sentences (roughly 30% of original)
+        if num_sentences is None:
+            num_sentences = max(1, len(sentences) // 3)
+        
+        if len(sentences) <= num_sentences:
+            return text
+        
+        # Calculate word frequencies (excluding common words)
+        stopwords = {
+            'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then', 'is', 'are', 'was', 'were',
+            'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
+            'could', 'should', 'may', 'might', 'must', 'can', 'to', 'of', 'in', 'for', 'from',
+            'with', 'by', 'on', 'at', 'it', 'this', 'that', 'these', 'those', 'i', 'you', 'he',
+            'she', 'we', 'they', 'what', 'which', 'who', 'when', 'where', 'why', 'how'
+        }
+        
+        word_freq = Counter()
+        for sentence in sentences:
+            words = re.findall(r'\b\w+\b', sentence.lower())
+            for word in words:
+                if word not in stopwords and len(word) > 2:
+                    word_freq[word] += 1
+        
+        # Score sentences based on word frequency
+        sentence_scores = {}
+        for i, sentence in enumerate(sentences):
+            words = re.findall(r'\b\w+\b', sentence.lower())
+            score = sum(word_freq[word] for word in words if word in word_freq)
+            sentence_scores[i] = score
+        
+        # Get top sentences in original order
+        top_sentence_indices = sorted(
+            sorted(sentence_scores, key=lambda x: sentence_scores[x], reverse=True)[:num_sentences]
+        )
+        
+        summary = ' '.join(sentences[i] for i in top_sentence_indices)
+        logger.info(f"Using extractive summarization fallback: {len(sentences)} → {len(top_sentence_indices)} sentences")
         return summary
         
     except Exception as e:
-        logger.error(f"Error during summarization: {str(e)}")
+        logger.error(f"Error during extractive summarization: {str(e)}")
         raise
  
  
