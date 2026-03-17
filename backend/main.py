@@ -1,17 +1,17 @@
 # FastAPI Backend for AI Text Summarizer Chatbot
-# This module sets up a REST API endpoint for text summarization
-# using Hugging Face Transformers library
- 
+# This module sets up a lightweight summarization API
+# using extractive summarization (no heavy ML models needed)
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-import torch
 import logging
 from fastapi import File, UploadFile
 import PyPDF2
 import io
- 
+import re
+from collections import Counter
+
 # Configure logging for debugging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 app = FastAPI(
     title="AI Text Summarizer API",
-    description="API for summarizing text using Hugging Face Transformers",
+    description="API for summarizing text using lightweight extractive summarization (no heavy ML models)",
     version="1.0.0"
 )
  
@@ -38,14 +38,6 @@ app.add_middleware(
     expose_headers=["*"],
     max_age=600,
 )
- 
-# ============================================================================
-# Global variables to store the summarization model and tokenizer
-# These are loaded on-demand (lazy loading) to save memory
-# ============================================================================
-model = None
-tokenizer = None
- 
  
 # ============================================================================
 # Data Model for Request/Response
@@ -68,45 +60,70 @@ class SummarizeResponse(BaseModel):
  
  
 # ============================================================================
-# Function to Load Summarization Model
+# Function to Perform Extractive Summarization
 # ============================================================================
-def load_summarization_model():
+def extractive_summarize(text: str, num_sentences: int = None) -> str:
     """
-    Load the Hugging Face summarization pipeline.
-    Uses the 'distilbart-cnn-6-6' model for memory efficiency on Render free tier.
-    This is a distilled version of BART optimized for summarization.
+    Extract the most important sentences from text based on word frequency.
+    This is lightweight and doesn't require loading large ML models.
     
+    Args:
+        text (str): The text to summarize
+        num_sentences (int): Number of sentences to extract (auto-calculated if None)
+        
     Returns:
-        tuple: (model, tokenizer) objects for text summarization
+        str: The summary
     """
-    logger.info("Loading summarization model...")
     try:
-        # Load tokenizer and model directly
-        # Using distilbart for memory efficiency (fits in 512MB)
-        model_name = "sshleifer/distilbart-cnn-6-6"
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-        logger.info("Model loaded successfully!")
-        return model, tokenizer
+        # Split into sentences
+        sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+        sentences = [s.strip() for s in sentences if s.strip()]
+        
+        if len(sentences) == 0:
+            return text
+        
+        # Auto-calculate number of sentences (roughly 30% of original)
+        if num_sentences is None:
+            num_sentences = max(1, len(sentences) // 3)
+        
+        if len(sentences) <= num_sentences:
+            return text
+        
+        # Calculate word frequencies (excluding common words)
+        stopwords = {
+            'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then', 'is', 'are', 'was', 'were',
+            'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
+            'could', 'should', 'may', 'might', 'must', 'can', 'to', 'of', 'in', 'for', 'from',
+            'with', 'by', 'on', 'at', 'it', 'this', 'that', 'these', 'those', 'i', 'you', 'he',
+            'she', 'we', 'they', 'what', 'which', 'who', 'when', 'where', 'why', 'how'
+        }
+        
+        word_freq = Counter()
+        for sentence in sentences:
+            words = re.findall(r'\b\w+\b', sentence.lower())
+            for word in words:
+                if word not in stopwords and len(word) > 2:
+                    word_freq[word] += 1
+        
+        # Score sentences based on word frequency
+        sentence_scores = {}
+        for i, sentence in enumerate(sentences):
+            words = re.findall(r'\b\w+\b', sentence.lower())
+            score = sum(word_freq[word] for word in words if word in word_freq)
+            sentence_scores[i] = score
+        
+        # Get top sentences in original order
+        top_sentence_indices = sorted(
+            sorted(sentence_scores, key=lambda x: sentence_scores[x], reverse=True)[:num_sentences]
+        )
+        
+        summary = ' '.join(sentences[i] for i in top_sentence_indices)
+        logger.info(f"Extractive summarization: {len(sentences)} sentences → {len(top_sentence_indices)} sentences")
+        return summary
+        
     except Exception as e:
-        logger.error(f"Error loading model: {str(e)}")
+        logger.error(f"Error during summarization: {str(e)}")
         raise
- 
- 
-# ============================================================================
-# Function to Ensure Model is Loaded
-# Load the model on-demand (lazy loading) to save memory
-# ============================================================================
-def ensure_model_loaded():
-    """
-    Ensure the model is loaded. Load on-demand if not already loaded.
-    This saves memory by only loading when needed.
-    """
-    global model, tokenizer
-    if model is None or tokenizer is None:
-        logger.info("Model not loaded yet, loading now...")
-        model, tokenizer = load_summarization_model()
-    return model, tokenizer
  
  
 # ============================================================================
@@ -162,7 +179,7 @@ async def health_check():
 @app.post("/summarize", response_model=SummarizeResponse)
 async def summarize_text(request: SummarizeRequest):
     """
-    Summarize the provided text.
+    Summarize the provided text using extractive summarization.
     
     Args:
         request (SummarizeRequest): JSON object containing 'text' field
@@ -181,36 +198,10 @@ async def summarize_text(request: SummarizeRequest):
                 detail="Text cannot be empty"
             )
         
-        # Load model on-demand
-        model, tokenizer = ensure_model_loaded()
-        
         logger.info(f"Received text of length: {len(request.text)}")
         
-        # Tokenize the input text
-        inputs = tokenizer.encode(request.text, return_tensors="pt", max_length=1024, truncation=True)
-        
-        # Calculate dynamic summary length based on input length
-        text_word_count = len(request.text.split())
-        # Ensure reasonable limits
-        max_summary_length = min(150, max(30, text_word_count // 3))
-        min_summary_length = min(max_summary_length - 10, max(10, text_word_count // 5))
-        
-        # Ensure min is not greater than max
-        if min_summary_length > max_summary_length:
-            min_summary_length = max(10, max_summary_length - 10)
-        
-        logger.info(f"Summary length: min={min_summary_length}, max={max_summary_length}")
-        
-        # Generate summary with simpler parameters
-        summary_ids = model.generate(
-            inputs,
-            max_length=max_summary_length,
-            min_length=min_summary_length,
-            do_sample=False
-        )
-        
-        # Decode the summary
-        summary_text = tokenizer.decode(summary_ids[0], skip_special_tokens=True)
+        # Perform extractive summarization (no model loading needed!)
+        summary_text = extractive_summarize(request.text)
         
         logger.info(f"Summarization successful!")
         
@@ -275,32 +266,8 @@ async def summarize_pdf(file: UploadFile = File(...)):
         extracted_text = extract_text_from_pdf(file_content)
         logger.info(f"Extracted {len(extracted_text)} characters from PDF")
         
-        # Load model on-demand
-        model, tokenizer = ensure_model_loaded()
-        
-        # Tokenize the extracted text
-        inputs = tokenizer.encode(extracted_text, return_tensors="pt", max_length=1024, truncation=True)
-        
-        # Calculate dynamic summary length
-        text_word_count = len(extracted_text.split())
-        max_summary_length = min(150, max(30, text_word_count // 3))
-        min_summary_length = min(max_summary_length - 10, max(10, text_word_count // 5))
-        
-        if min_summary_length > max_summary_length:
-            min_summary_length = max(10, max_summary_length - 10)
-        
-        logger.info(f"PDF Summary length: min={min_summary_length}, max={max_summary_length}")
-        
-        # Generate summary
-        summary_ids = model.generate(
-            inputs,
-            max_length=max_summary_length,
-            min_length=min_summary_length,
-            do_sample=False
-        )
-        
-        # Decode the summary
-        summary_text = tokenizer.decode(summary_ids[0], skip_special_tokens=True)
+        # Perform extractive summarization (no model loading needed!)
+        summary_text = extractive_summarize(extracted_text)
         
         logger.info(f"PDF Summarization successful!")
         

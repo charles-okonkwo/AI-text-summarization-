@@ -2,17 +2,6 @@
 fastapi
 uvicorn
 
-# ML/AI Libraries
-transformers
-torch
-numpy
-
-# Data Validation
-pydantic
-
-# Utilities
-python-dotenv
-
 # PDF Processing
 PyPDF2
 python-multipart
