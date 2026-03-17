@@ -2,6 +2,9 @@
 fastapi
 uvicorn
 
+# HTTP Requests (for HF API)
+requests
+
 # PDF Processing
 PyPDF2
 python-multipart

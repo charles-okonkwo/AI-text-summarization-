@@ -1,6 +1,6 @@
 # FastAPI Backend for AI Text Summarizer Chatbot
-# This module sets up a lightweight summarization API
-# using extractive summarization (no heavy ML models needed)
+# This module sets up a REST API endpoint for text summarization
+# using Hugging Face Inference API for abstractive summarization
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,12 +9,21 @@ import logging
 from fastapi import File, UploadFile
 import PyPDF2
 import io
-import re
-from collections import Counter
+import requests
+import os
 
 # Configure logging for debugging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Get HF token from environment variable
+HF_TOKEN = os.getenv("HF_TOKEN")
+if not HF_TOKEN:
+    logger.warning("HF_TOKEN environment variable not set. Summarization will fail.")
+
+# Hugging Face Inference API configuration
+HF_API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
+HF_HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
  
 # ============================================================================
 # Initialize FastAPI Application
@@ -60,65 +69,52 @@ class SummarizeResponse(BaseModel):
  
  
 # ============================================================================
-# Function to Perform Extractive Summarization
+# Function to Perform Abstractive Summarization using HF Inference API
 # ============================================================================
-def extractive_summarize(text: str, num_sentences: int = None) -> str:
+def abstractive_summarize(text: str) -> str:
     """
-    Extract the most important sentences from text based on word frequency.
-    This is lightweight and doesn't require loading large ML models.
+    Summarize text using Hugging Face Inference API (BART model).
+    This performs true abstractive summarization - generating new sentences.
     
     Args:
         text (str): The text to summarize
-        num_sentences (int): Number of sentences to extract (auto-calculated if None)
         
     Returns:
         str: The summary
+        
+    Raises:
+        Exception: If API call fails
     """
     try:
-        # Split into sentences
-        sentences = re.split(r'(?<=[.!?])\s+', text.strip())
-        sentences = [s.strip() for s in sentences if s.strip()]
+        if not HF_TOKEN:
+            raise Exception("HF_TOKEN not configured. Please set HF_TOKEN environment variable.")
         
-        if len(sentences) == 0:
-            return text
+        # Split text into chunks if too long (max ~1024 tokens)
+        # BART has input limit, so truncate if needed
+        max_chars = 1000
+        if len(text) > max_chars:
+            text = text[:max_chars]
         
-        # Auto-calculate number of sentences (roughly 30% of original)
-        if num_sentences is None:
-            num_sentences = max(1, len(sentences) // 3)
+        logger.info(f"Sending text to HF API for summarization (length: {len(text)})")
         
-        if len(sentences) <= num_sentences:
-            return text
+        # Call Hugging Face Inference API
+        payload = {"inputs": text}
+        response = requests.post(HF_API_URL, headers=HF_HEADERS, json=payload, timeout=30)
         
-        # Calculate word frequencies (excluding common words)
-        stopwords = {
-            'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then', 'is', 'are', 'was', 'were',
-            'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
-            'could', 'should', 'may', 'might', 'must', 'can', 'to', 'of', 'in', 'for', 'from',
-            'with', 'by', 'on', 'at', 'it', 'this', 'that', 'these', 'those', 'i', 'you', 'he',
-            'she', 'we', 'they', 'what', 'which', 'who', 'when', 'where', 'why', 'how'
-        }
+        if response.status_code != 200:
+            error_msg = response.text
+            logger.error(f"HF API error: {response.status_code} - {error_msg}")
+            raise Exception(f"Hugging Face API error: {error_msg}")
         
-        word_freq = Counter()
-        for sentence in sentences:
-            words = re.findall(r'\b\w+\b', sentence.lower())
-            for word in words:
-                if word not in stopwords and len(word) > 2:
-                    word_freq[word] += 1
+        result = response.json()
         
-        # Score sentences based on word frequency
-        sentence_scores = {}
-        for i, sentence in enumerate(sentences):
-            words = re.findall(r'\b\w+\b', sentence.lower())
-            score = sum(word_freq[word] for word in words if word in word_freq)
-            sentence_scores[i] = score
+        # Extract summary from response
+        if isinstance(result, list) and len(result) > 0:
+            summary = result[0].get("summary_text", "")
+        else:
+            summary = result.get("summary_text", "")
         
-        # Get top sentences in original order
-        top_sentence_indices = sorted(
-            sorted(sentence_scores, key=lambda x: sentence_scores[x], reverse=True)[:num_sentences]
-        )
-        
-        summary = ' '.join(sentences[i] for i in top_sentence_indices)
-        logger.info(f"Extractive summarization: {len(sentences)} sentences → {len(top_sentence_indices)} sentences")
+        logger.info(f"Summarization successful! Summary length: {len(summary)}")
         return summary
         
     except Exception as e:
@@ -179,7 +175,7 @@ async def health_check():
 @app.post("/summarize", response_model=SummarizeResponse)
 async def summarize_text(request: SummarizeRequest):
     """
-    Summarize the provided text using extractive summarization.
+    Summarize the provided text using Hugging Face Inference API.
     
     Args:
         request (SummarizeRequest): JSON object containing 'text' field
@@ -200,8 +196,8 @@ async def summarize_text(request: SummarizeRequest):
         
         logger.info(f"Received text of length: {len(request.text)}")
         
-        # Perform extractive summarization (no model loading needed!)
-        summary_text = extractive_summarize(request.text)
+        # Perform abstractive summarization via HF API
+        summary_text = abstractive_summarize(request.text)
         
         logger.info(f"Summarization successful!")
         
@@ -266,8 +262,8 @@ async def summarize_pdf(file: UploadFile = File(...)):
         extracted_text = extract_text_from_pdf(file_content)
         logger.info(f"Extracted {len(extracted_text)} characters from PDF")
         
-        # Perform extractive summarization (no model loading needed!)
-        summary_text = extractive_summarize(extracted_text)
+        # Perform abstractive summarization via HF API
+        summary_text = abstractive_summarize(extracted_text)
         
         logger.info(f"PDF Summarization successful!")
         
