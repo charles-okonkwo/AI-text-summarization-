@@ -73,7 +73,8 @@ class SummarizeResponse(BaseModel):
 def load_summarization_model():
     """
     Load the Hugging Face summarization pipeline.
-    Uses the 'facebook/bart-large-cnn' model which is optimized for summarization.
+    Uses the 'distilbart-cnn-6-6' model for memory efficiency on Render free tier.
+    This is a distilled version of BART optimized for summarization.
     
     Returns:
         tuple: (model, tokenizer) objects for text summarization
@@ -81,7 +82,8 @@ def load_summarization_model():
     logger.info("Loading summarization model...")
     try:
         # Load tokenizer and model directly
-        model_name = "facebook/bart-large-cnn"
+        # Using distilbart for memory efficiency (fits in 512MB)
+        model_name = "sshleifer/distilbart-cnn-6-6"
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
         logger.info("Model loaded successfully!")
