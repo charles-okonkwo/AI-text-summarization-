@@ -231,6 +231,15 @@ function startNewChat() {
     userInput.value = '';
     userInput.style.height = 'auto';
     
+    // Reset PDF upload state
+    selectedPdfFile = null;
+    pdfInput.value = '';
+    pdfUploadArea.style.display = 'flex';
+    pdfPreview.style.display = 'none';
+    
+    // Switch back to text mode
+    switchInputMode('text');
+    
     // Add welcome section back
     const welcomeSection = document.createElement('div');
     welcomeSection.classList.add('welcome-section');
