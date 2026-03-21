@@ -2,12 +2,91 @@
 // ChatGPT-Style Text Summarizer - Frontend JavaScript
 // ============================================================================
 
+// Check if speech recognition is supported
+const speechRecognitionSupported = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+console.log('Speech Recognition Supported:', speechRecognitionSupported);
+
 // Use localhost for development, production URL for deployed version
 const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
     ? 'http://localhost:8000'
     : 'https://ai-text-summarization-4.onrender.com';
 
 let conversationHistory = [];
+
+// Speech-to-Text state
+let isListening = false;
+let recognition = null;
+
+// Initialize Speech Recognition if available
+function initSpeechRecognition() {
+    try {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            console.warn('Speech Recognition not supported in this browser');
+            return;
+        }
+        
+        recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+        
+        recognition.onstart = () => {
+            isListening = true;
+            const micBtn = document.getElementById('micBtn');
+            if (micBtn) micBtn.classList.add('listening');
+            console.log('Speech recognition started');
+        };
+        
+        recognition.onresult = (event) => {
+            const userInputEl = document.getElementById('userInput');
+            if (!userInputEl) return;
+            
+            let transcript = '';
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                transcript += event.results[i][0].transcript;
+            }
+            
+            if (transcript) {
+                userInputEl.value = transcript;
+                userInputEl.style.height = 'auto';
+                userInputEl.style.height = Math.min(userInputEl.scrollHeight, 200) + 'px';
+                console.log('Transcript:', transcript);
+            }
+        };
+        
+        recognition.onend = () => {
+            isListening = false;
+            const micBtn = document.getElementById('micBtn');
+            if (micBtn) micBtn.classList.remove('listening');
+            console.log('Speech recognition ended');
+        };
+        
+        recognition.onerror = (event) => {
+            isListening = false;
+            const micBtn = document.getElementById('micBtn');
+            if (micBtn) micBtn.classList.remove('listening');
+            console.error('Speech recognition error:', event.error);
+            alert('Microphone error: ' + event.error);
+        };
+    } catch (error) {
+        console.error('Failed to initialize speech recognition:', error);
+    }
+}
+
+// Initialize when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log('DOM Content Loaded - Initializing Speech Recognition');
+        initSpeechRecognition();
+    });
+} else {
+    console.log('DOM Already Loaded - Initializing Speech Recognition');
+    initSpeechRecognition();
+}
+
+// Also make toggleMicrophone globally available
+window.toggleMicrophone = toggleMicrophone;
 
 // DOM Elements
 const userInput = document.getElementById('userInput');
@@ -348,6 +427,37 @@ function switchInputMode(mode) {
     } else if (mode === 'pdf') {
         textMode.style.display = 'none';
         pdfMode.style.display = 'flex';
+    }
+}
+
+// ============================================================================
+// Speech-to-Text Functions
+// ============================================================================
+
+function toggleMicrophone() {
+    console.log('Toggle microphone called, recognition:', recognition, 'isListening:', isListening);
+    
+    if (!recognition) {
+        alert('Speech recognition is not supported in your browser. Please use Chrome, Edge, or Safari.');
+        return;
+    }
+    
+    try {
+        if (isListening) {
+            console.log('Stopping speech recognition');
+            recognition.stop();
+        } else {
+            // Clear previous input and start listening
+            const userInputEl = document.getElementById('userInput');
+            if (userInputEl) {
+                userInputEl.value = '';
+            }
+            console.log('Starting speech recognition');
+            recognition.start();
+        }
+    } catch (error) {
+        console.error('Error toggling microphone:', error);
+        alert('Microphone error: ' + error.message);
     }
 }
 
