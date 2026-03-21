@@ -2,7 +2,11 @@
 // ChatGPT-Style Text Summarizer - Frontend JavaScript
 // ============================================================================
 
-const API_BASE_URL = 'https://ai-text-summarization-4.onrender.com';
+// Use localhost for development, production URL for deployed version
+const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? 'http://localhost:8000'
+    : 'https://ai-text-summarization-4.onrender.com';
+
 let conversationHistory = [];
 
 // DOM Elements
