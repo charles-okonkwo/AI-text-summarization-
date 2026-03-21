@@ -21,12 +21,24 @@ const inputTabs = document.querySelectorAll('.input-tab');
 const textMode = document.getElementById('textMode');
 const pdfMode = document.getElementById('pdfMode');
 const pdfUploadArea = document.getElementById('pdfUploadArea');
-const pdfInput = document.getElementById('pdfInput');
+let pdfInput = document.getElementById('pdfInput');  // Changed from const to let
 const pdfPreview = document.getElementById('pdfPreview');
 const pdfFileName = document.getElementById('pdfFileName');
+const pdfInstruction = document.getElementById('pdfInstruction');
 const sendPdfBtn = document.getElementById('sendPdfBtn');
 
 let selectedPdfFile = null;
+
+// ============================================================================
+// Helper Functions for PDF Upload
+// ============================================================================
+
+function clickUploadHandler() {
+    const fileInput = document.getElementById('pdfInput');
+    if (fileInput) {
+        fileInput.click();
+    }
+}
 
 // ============================================================================
 // Event Listeners
@@ -41,9 +53,7 @@ inputTabs.forEach(tab => {
 });
 
 // PDF upload area click
-pdfUploadArea.addEventListener('click', () => {
-    pdfInput.click();
-});
+pdfUploadArea.addEventListener('click', clickUploadHandler);
 
 // PDF file selection
 pdfInput.addEventListener('change', handlePdfFileSelect);
@@ -232,10 +242,7 @@ function startNewChat() {
     userInput.style.height = 'auto';
     
     // Reset PDF upload state
-    selectedPdfFile = null;
-    pdfInput.value = '';
-    pdfUploadArea.style.display = 'flex';
-    pdfPreview.style.display = 'none';
+    resetPdfUpload();
     
     // Switch back to text mode
     switchInputMode('text');
@@ -344,6 +351,26 @@ function switchInputMode(mode) {
 // PDF File Handling
 // ============================================================================
 
+function resetPdfUpload() {
+    // Clear the selected file
+    selectedPdfFile = null;
+    
+    // Clear instruction text
+    if (pdfInstruction) {
+        pdfInstruction.value = '';
+    }
+    
+    // Reset file input by setting value to empty string
+    // This allows selecting the same file again or different files
+    if (pdfInput) {
+        pdfInput.value = '';
+    }
+    
+    // Reset UI
+    pdfUploadArea.style.display = 'flex';
+    pdfPreview.style.display = 'none';
+}
+
 function handlePdfFileSelect(event) {
     const files = event.target.files;
     if (files.length === 0) return;
@@ -378,8 +405,18 @@ async function sendPdfFile() {
     const formData = new FormData();
     formData.append('file', selectedPdfFile);
     
-    // Display file info message
-    displayMessage(`📄 Processing PDF: ${selectedPdfFile.name}`, 'user');
+    // Get instruction text if provided
+    const instruction = pdfInstruction.value.trim();
+    if (instruction) {
+        formData.append('instruction', instruction);
+    }
+    
+    // Display file info message with instruction if provided
+    let userMessage = `📄 Processing PDF: ${selectedPdfFile.name}`;
+    if (instruction) {
+        userMessage += `\n📝 Instructions: ${instruction}`;
+    }
+    displayMessage(userMessage, 'user');
     
     // Show loading
     showLoading(true);
@@ -401,7 +438,7 @@ async function sendPdfFile() {
         // Save to history
         conversationHistory.push({
             timestamp: new Date(),
-            userText: `PDF: ${selectedPdfFile.name}`,
+            userText: `PDF: ${selectedPdfFile.name}${instruction ? '\nInstructions: ' + instruction : ''}`,
             aiResponse: data.summary
         });
         
@@ -414,6 +451,9 @@ async function sendPdfFile() {
         );
     } finally {
         showLoading(false);
+        
+        // Reset PDF upload state to allow uploading another PDF in same chat
+        resetPdfUpload();
     }
 }
 

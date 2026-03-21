@@ -297,12 +297,13 @@ async def summarize_text(request: SummarizeRequest):
 # PDF Summarization Endpoint
 # ============================================================================
 @app.post("/summarize-pdf", response_model=SummarizeResponse)
-async def summarize_pdf(file: UploadFile = File(...)):
+async def summarize_pdf(file: UploadFile = File(...), instruction: str = None):
     """
     Summarize text extracted from an uploaded PDF file.
     
     Args:
         file (UploadFile): The PDF file to summarize
+        instruction (str): Optional custom instruction for summarization
         
     Returns:
         SummarizeResponse: JSON object with 'summary' field
@@ -335,13 +336,22 @@ async def summarize_pdf(file: UploadFile = File(...)):
                 )
         
         logger.info(f"Received PDF file: {file.filename} ({file_size} bytes)")
+        if instruction:
+            logger.info(f"User instruction: {instruction}")
         
         # Extract text from PDF
         extracted_text = extract_text_from_pdf(file_content)
         logger.info(f"Extracted {len(extracted_text)} characters from PDF")
         
+        # If instruction is provided, prepend it to guide the summarization
+        if instruction and instruction.strip():
+            # Create a prompt that guides the AI to follow the user's instruction
+            text_to_summarize = f"INSTRUCTION: {instruction}\n\nTEXT TO SUMMARIZE:\n{extracted_text}"
+        else:
+            text_to_summarize = extracted_text
+        
         # Perform abstractive summarization via HF API
-        summary_text = abstractive_summarize(extracted_text)
+        summary_text = abstractive_summarize(text_to_summarize)
         
         logger.info(f"PDF Summarization successful!")
         

@@ -494,7 +494,7 @@ body {
 
 #pdfPreview {
     display: flex;
-    align-items: center;
+    flex-direction: column;
     gap: 12px;
     padding: 12px 16px;
     background: var(--bg-secondary);
@@ -511,6 +511,34 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.pdf-instruction-wrapper {
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+    width: 100%;
+}
+
+.pdf-instruction-wrapper textarea {
+    flex: 1;
+    min-height: 60px;
+    max-height: 100px;
+    padding: 10px !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: 6px;
+    background: var(--bg-primary) !important;
+    font-family: inherit;
+    font-size: 14px;
+    resize: vertical;
+    color: var(--text-primary) !important;
+}
+
+.pdf-instruction-wrapper .send-btn {
+    flex-shrink: 0;
+    padding: 10px;
+    min-width: 44px;
+    height: 44px;
 }
 
 /* ============================================================================
