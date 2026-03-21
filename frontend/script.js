@@ -101,7 +101,6 @@ const historyList = document.getElementById('historyList');
 const languageSelect = document.getElementById('languageSelect');
 
 // PDF Upload elements
-const inputTabs = document.querySelectorAll('.input-tab');
 const textMode = document.getElementById('textMode');
 const pdfMode = document.getElementById('pdfMode');
 const pdfUploadArea = document.getElementById('pdfUploadArea');
@@ -110,11 +109,18 @@ const pdfPreview = document.getElementById('pdfPreview');
 const pdfFileName = document.getElementById('pdfFileName');
 const pdfInstruction = document.getElementById('pdfInstruction');
 const sendPdfBtn = document.getElementById('sendPdfBtn');
+const pdfCloseBtn = document.getElementById('pdfCloseBtn');
+
+// Attachment chip elements
+const attachmentChip = document.getElementById('attachmentChip');
+const attachmentName = document.getElementById('attachmentName');
+const attachmentRemoveBtn = document.getElementById('attachmentRemoveBtn');
+const addBtn = document.getElementById('addBtn');
 
 let selectedPdfFile = null;
 
 // ============================================================================
-// Helper Functions for PDF Upload
+// Helper Functions for PDF Upload & Attachment
 // ============================================================================
 
 function clickUploadHandler() {
@@ -124,17 +130,47 @@ function clickUploadHandler() {
     }
 }
 
+// Show attachment chip with file info
+function showAttachmentChip(file) {
+    const name = file.name.length > 30 ? file.name.substring(0, 27) + '...' : file.name;
+    attachmentName.textContent = name;
+    attachmentChip.style.display = 'flex';
+    addBtn.classList.add('attached');
+}
+
+// Hide attachment chip
+function hideAttachmentChip() {
+    attachmentChip.style.display = 'none';
+    addBtn.classList.remove('attached');
+}
+
+// Remove attached file
+function removeAttachment() {
+    selectedPdfFile = null;
+    hideAttachmentChip();
+    userInput.focus();
+}
+
+// Function to close PDF upload modal
+function closePdfUpload() {
+    switchInputMode('text');
+    resetPdfUpload();
+}
+
+// Function to trigger PDF upload from the plus icon
+function triggerPdfUpload() {
+    // Switch to PDF mode (shows modal overlay)
+    switchInputMode('pdf');
+    
+    // Delay file picker slightly to allow modal to render
+    setTimeout(() => {
+        clickUploadHandler();
+    }, 100);
+}
+
 // ============================================================================
 // Event Listeners
 // ============================================================================
-
-// Input mode tab switching
-inputTabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-        const mode = tab.dataset.mode;
-        switchInputMode(mode);
-    });
-});
 
 // Language selection - auto-translate when language changes
 languageSelect.addEventListener('change', (e) => {
@@ -171,6 +207,23 @@ pdfUploadArea.addEventListener('drop', (e) => {
 
 // Send PDF button
 sendPdfBtn.addEventListener('click', sendPdfFile);
+
+// PDF Modal - Close button
+pdfCloseBtn.addEventListener('click', closePdfUpload);
+
+// PDF Modal - Close on Escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && pdfMode.style.display !== 'none') {
+        closePdfUpload();
+    }
+});
+
+// PDF Modal - Close on backdrop click (outside modal)
+pdfMode.addEventListener('click', (e) => {
+    if (e.target === pdfMode) {
+        closePdfUpload();
+    }
+});
 
 // Send message on button click
 sendBtn.addEventListener('click', sendMessage);
@@ -215,6 +268,13 @@ document.addEventListener('click', (e) => {
 
 async function sendMessage() {
     const text = userInput.value.trim();
+
+    // Check if there's an attached PDF
+    if (selectedPdfFile) {
+        // Send PDF with optional text instructions
+        await sendPdfFile(text);
+        return;
+    }
 
     if (!text) {
         userInput.focus();
@@ -423,11 +483,6 @@ function loadConversation(conv) {
 // ============================================================================
 
 function switchInputMode(mode) {
-    // Update tabs
-    inputTabs.forEach(tab => {
-        tab.classList.toggle('active', tab.dataset.mode === mode);
-    });
-    
     // Update modes
     if (mode === 'text') {
         textMode.style.display = 'flex';
@@ -435,7 +490,7 @@ function switchInputMode(mode) {
         userInput.focus();
     } else if (mode === 'pdf') {
         textMode.style.display = 'none';
-        pdfMode.style.display = 'flex';
+        pdfMode.style.display = 'flex'; // This displays the modal overlay
     }
 }
 
@@ -584,24 +639,33 @@ function handlePdfFileSelect(event) {
         return;
     }
     
-    // Store file and show preview
+    // Store file
     selectedPdfFile = file;
-    pdfUploadArea.style.display = 'none';
-    pdfPreview.style.display = 'flex';
-    pdfFileName.textContent = `📄 ${file.name}`;
+    
+    // Show attachment chip in input bar
+    showAttachmentChip(file);
+    
+    // Close upload modal immediately and return to chat
+    closePdfUpload();
+    
+    // Focus input field for user to type instructions
+    setTimeout(() => {
+        userInput.focus();
+    }, 100);
 }
 
-async function sendPdfFile() {
+async function sendPdfFile(instructionText = '') {
     if (!selectedPdfFile) {
         alert('Please select a PDF file first');
         return;
     }
     
+    const instruction = instructionText.trim();
+    
     const formData = new FormData();
     formData.append('file', selectedPdfFile);
     
-    // Get instruction text if provided
-    const instruction = pdfInstruction.value.trim();
+    // Add instruction text if provided
     if (instruction) {
         formData.append('instruction', instruction);
     }
@@ -612,6 +676,10 @@ async function sendPdfFile() {
         userMessage += `\n📝 Instructions: ${instruction}`;
     }
     displayMessage(userMessage, 'user');
+    
+    // Clear input field
+    userInput.value = '';
+    userInput.style.height = 'auto';
     
     // Show loading
     showLoading(true);
@@ -647,8 +715,13 @@ async function sendPdfFile() {
     } finally {
         showLoading(false);
         
-        // Reset PDF upload state to allow uploading another PDF in same chat
+        // Reset PDF upload state and hide attachment chip
+        selectedPdfFile = null;
+        hideAttachmentChip();
         resetPdfUpload();
+        
+        // Focus the text input for next message
+        userInput.focus();
     }
 }
 
