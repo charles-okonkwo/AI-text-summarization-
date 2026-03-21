@@ -14,6 +14,13 @@ import os
 import re
 from collections import Counter
 
+try:
+    from translate import Translator
+    TRANSLATION_AVAILABLE = True
+except ImportError:
+    TRANSLATION_AVAILABLE = False
+    Translator = None
+
 # Configure logging for debugging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -68,6 +75,26 @@ class SummarizeRequest(BaseModel):
 class SummarizeResponse(BaseModel):
     """Data model for outgoing response."""
     summary: str
+
+
+class TranslateRequest(BaseModel):
+    """Data model for translation request."""
+    text: str
+    target_language: str
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "text": "Hello, how are you?",
+                "target_language": "es"
+            }
+        }
+
+
+class TranslateResponse(BaseModel):
+    """Data model for translation response."""
+    translated_text: str
+    target_language: str
  
  
 # ============================================================================
@@ -231,6 +258,100 @@ def extract_text_from_pdf(file_content: bytes) -> str:
     except Exception as e:
         logger.error(f"Error extracting PDF text: {str(e)}")
         raise
+
+
+# ============================================================================
+# Function to Translate Text
+# ============================================================================
+def translate_text(text: str, target_language: str) -> str:
+    """
+    Translate text to target language using multiple fallback services.
+    Uses aggressive timeouts and fast APIs to ensure quick response.
+    
+    Args:
+        text (str): Text to translate
+        target_language (str): Target language code (e.g., 'es', 'fr', 'de')
+        
+    Returns:
+        str: Translated text or original text if all APIs fail
+    """
+    try:
+        # Language code mapping
+        language_codes = {
+            'es': 'es', 'fr': 'fr', 'de': 'de', 'it': 'it', 'pt': 'pt',
+            'nl': 'nl', 'pl': 'pl', 'ru': 'ru', 'zh': 'zh', 'zh-TW': 'zh_TW',
+            'ja': 'ja', 'ko': 'ko', 'hi': 'hi', 'th': 'th', 'vi': 'vi',
+            'ar': 'ar', 'tr': 'tr', 'he': 'he', 'fa': 'fa', 'sv': 'sv',
+            'da': 'da', 'no': 'no', 'cs': 'cs', 'hu': 'hu', 'el': 'el'
+        }
+        
+        lang_code = language_codes.get(target_language, target_language)
+        text_to_translate = text[:300]  # Limit to 300 chars for faster translation
+        
+        logger.info(f"Translating ({len(text_to_translate)} chars) to {target_language}")
+        
+        # Try MyMemory API first (fastest, no key needed)
+        try:
+            api_url = "https://api.mymemory.translated.net/get"
+            params = {
+                "q": text_to_translate,
+                "langpair": f"en|{lang_code}"
+            }
+            
+            logger.info(f"Trying MyMemory API with langpair en|{lang_code}")
+            response = requests.get(api_url, params=params, timeout=5)
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get('responseStatus') == 200:
+                    translated = result.get('responseData', {}).get('translatedText', '')
+                    if translated and translated.lower() != text_to_translate.lower():
+                        logger.info(f"✓ MyMemory translation successful!")
+                        return translated
+                    else:
+                        logger.warning(f"MyMemory returned same text, trying fallback...")
+            else:
+                logger.warning(f"MyMemory API returned status {response.status_code}")
+        except requests.exceptions.Timeout:
+            logger.warning(f"MyMemory API timeout (5s)")
+        except Exception as e:
+            logger.warning(f"MyMemory API error: {str(e)}")
+        
+        # Fallback to LibreTranslate API (with shorter timeout)
+        try:
+            api_url = "https://libretranslate.de/translate"
+            payload = {
+                "q": text_to_translate,
+                "source": "auto",
+                "target": lang_code
+            }
+            
+            logger.info(f"Trying LibreTranslate API with target {lang_code}")
+            response = requests.post(api_url, json=payload, timeout=5)
+            
+            if response.status_code == 200:
+                result = response.json()
+                translated = result.get('translatedText', '')
+                if translated and translated.lower() != text_to_translate.lower():
+                    logger.info(f"✓ LibreTranslate translation successful!")
+                    return translated
+                else:
+                    logger.warning(f"LibreTranslate returned same text")
+            else:
+                logger.warning(f"LibreTranslate API returned status {response.status_code}")
+        except requests.exceptions.Timeout:
+            logger.warning(f"LibreTranslate API timeout (5s)")
+        except Exception as e:
+            logger.warning(f"LibreTranslate API error: {str(e)}")
+        
+        # If all APIs fail, return original text
+        logger.warning(f"Translation APIs unavailable. Returning original text.")
+        return text
+        
+    except Exception as e:
+        logger.error(f"Critical translation error: {str(e)}")
+        return text
+
  
  
 # ============================================================================
@@ -290,6 +411,59 @@ async def summarize_text(request: SummarizeRequest):
         raise HTTPException(
             status_code=500,
             detail=f"Error summarizing text: {str(e)}"
+        )
+
+
+# ============================================================================
+# Translation Endpoint
+# ============================================================================
+@app.post("/translate", response_model=TranslateResponse)
+async def translate(request: TranslateRequest):
+    """
+    Translate text to target language.
+    
+    Args:
+        request (TranslateRequest): JSON object containing 'text' and 'target_language'
+        
+    Returns:
+        TranslateResponse: JSON object with translated text
+        
+    Raises:
+        HTTPException: If text is empty or translation fails
+    """
+    try:
+        # Validate input
+        if not request.text or len(request.text.strip()) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Text cannot be empty"
+            )
+        
+        if not request.target_language:
+            raise HTTPException(
+                status_code=400,
+                detail="Target language must be specified"
+            )
+        
+        logger.info(f"Translating text to {request.target_language}")
+        
+        # Perform translation
+        translated_text = translate_text(request.text, request.target_language)
+        
+        logger.info(f"Translation successful!")
+        
+        return TranslateResponse(
+            translated_text=translated_text,
+            target_language=request.target_language
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error during translation: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error translating text: {str(e)}"
         )
  
  

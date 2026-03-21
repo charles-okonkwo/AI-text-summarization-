@@ -91,13 +91,14 @@ window.toggleMicrophone = toggleMicrophone;
 // DOM Elements
 const userInput = document.getElementById('userInput');
 const chatMessages = document.getElementById('chatMessages');
-const sendBtn = document.querySelector('.send-btn');
+const sendBtn = document.querySelector('.send-btn-icon');
 const loadingIndicator = document.querySelector('.loading-indicator');
 const sidebar = document.getElementById('sidebar');
 const newChatBtn = document.querySelector('.new-chat-btn');
 const mobileSidebarToggle = document.querySelector('.mobile-sidebar-toggle');
 const sidebarToggle = document.querySelector('.sidebar-toggle');
 const historyList = document.getElementById('historyList');
+const languageSelect = document.getElementById('languageSelect');
 
 // PDF Upload elements
 const inputTabs = document.querySelectorAll('.input-tab');
@@ -133,6 +134,13 @@ inputTabs.forEach(tab => {
         const mode = tab.dataset.mode;
         switchInputMode(mode);
     });
+});
+
+// Language selection - auto-translate when language changes
+languageSelect.addEventListener('change', (e) => {
+    if (e.target.value && userInput.value.trim()) {
+        translateInputText();
+    }
 });
 
 // PDF upload area click
@@ -233,6 +241,7 @@ async function sendMessage() {
             userText: text,
             aiResponse: summary
         });
+
         
         // Save to localStorage
         saveConversationHistory();
@@ -458,6 +467,78 @@ function toggleMicrophone() {
     } catch (error) {
         console.error('Error toggling microphone:', error);
         alert('Microphone error: ' + error.message);
+    }
+}
+
+// ============================================================================
+// Translation Functions
+// ============================================================================
+
+async function translateInputText() {
+    const text = userInput.value.trim();
+    const targetLanguage = languageSelect.value;
+    
+    console.log('Translate clicked:', { text, targetLanguage });
+    
+    if (!text) {
+        alert('Please enter some text to translate');
+        return;
+    }
+    
+    if (!targetLanguage) {
+        alert('Please select a language to translate to');
+        return;
+    }
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+    
+    showLoading(true);
+    
+    try {
+        console.log('Sending translation request to:', `${API_BASE_URL}/translate`);
+        
+        const response = await fetch(`${API_BASE_URL}/translate`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                text: text,
+                target_language: targetLanguage
+            }),
+            signal: controller.signal
+        });
+        
+        console.log('Translation response status:', response.status);
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.detail || `HTTP ${response.status}: Failed to translate text`);
+        }
+        
+        const data = await response.json();
+        console.log('Translation successful:', data);
+        
+        if (data.translated_text) {
+            userInput.value = data.translated_text;
+            userInput.style.height = 'auto';
+            userInput.style.height = Math.min(userInput.scrollHeight, 200) + 'px';
+            alert('Text translated successfully!');
+        } else {
+            throw new Error('No translated text in response');
+        }
+    } catch (error) {
+        console.error('Translation error:', error);
+        
+        if (error.name === 'AbortError') {
+            alert('Translation timed out. Please try again with shorter text.');
+        } else {
+            alert('Translation failed: ' + error.message);
+        }
+    } finally {
+        clearTimeout(timeoutId);
+        showLoading(false);
     }
 }
 
